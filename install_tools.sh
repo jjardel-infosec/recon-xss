@@ -401,7 +401,8 @@ check_or_install_python_tool() {
 check_required_tools() {
     check_or_install_go_tool "subfinder" "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
     check_or_install_go_tool "assetfinder" "github.com/tomnomnom/assetfinder@latest"
-    check_or_install_apt_tool "amass" "amass"
+    check_or_install_apt_tool "findomain" "findomain"
+    check_or_install_go_tool "chaos" "github.com/projectdiscovery/chaos-client/cmd/chaos@latest"
     check_or_install_go_tool "httpx" "github.com/projectdiscovery/httpx/cmd/httpx@latest"
     check_or_install_go_tool "waybackurls" "github.com/tomnomnom/waybackurls@latest"
     check_or_install_go_tool "gau" "github.com/lc/gau/v2/cmd/gau@latest"

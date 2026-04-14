@@ -59,6 +59,20 @@ join_by() {
     printf '%s' "$output"
 }
 
+chaos_api_key() {
+    if [ -n "${CHAOS_KEY:-}" ]; then
+        printf '%s' "$CHAOS_KEY"
+        return 0
+    fi
+
+    if [ -n "${CHAOS_API_KEY:-}" ]; then
+        printf '%s' "$CHAOS_API_KEY"
+        return 0
+    fi
+
+    return 1
+}
+
 initialize_ui() {
     if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
         COLOR_RESET=$'\033[0m'
@@ -400,14 +414,27 @@ warn_missing_dependencies() {
     local enum_missing=()
     local probe_missing=()
     local url_missing=()
+    local chaos_key=""
+    local has_enumerator=0
     local tool=""
 
     if [ "$MODE" = "interactive" ]; then
-        for tool in subfinder assetfinder amass; do
-            if ! command_exists "$tool"; then
+        for tool in subfinder assetfinder findomain; do
+            if command_exists "$tool"; then
+                has_enumerator=1
+            else
                 enum_missing+=("$tool")
             fi
         done
+
+        chaos_key="$(chaos_api_key 2>/dev/null || true)"
+        if [ -n "$chaos_key" ]; then
+            if command_exists chaos; then
+                has_enumerator=1
+            else
+                log_warn "CHAOS_KEY/CHAOS_API_KEY detected but chaos is not installed. Chaos will be skipped."
+            fi
+        fi
     fi
 
     for tool in httpx; do
@@ -424,7 +451,7 @@ warn_missing_dependencies() {
 
     if [ "${#enum_missing[@]}" -gt 0 ]; then
         log_warn "Interactive mode is missing enumeration tools: $(join_by ', ' "${enum_missing[@]}")"
-        if [ "${#enum_missing[@]}" -eq 3 ]; then
+        if [ "$has_enumerator" -eq 0 ]; then
             log_warn "No enumeration tools are available. Use file/STDIN mode or install the missing tools."
         fi
     fi
@@ -506,14 +533,32 @@ run_assetfinder() {
     fi
 }
 
-run_amass() {
+run_findomain() {
     local domain="$1"
 
-    if command_exists amass; then
-        log_info "Running amass against $domain"
-        amass enum -passive -norecursive -d "$domain" >> "$ENUMERATION_BUFFER" 2>> "$PIPELINE_LOG" || log_warn "amass failed."
+    if command_exists findomain; then
+        log_info "Running findomain against $domain"
+        findomain -t "$domain" -q >> "$ENUMERATION_BUFFER" 2>> "$PIPELINE_LOG" || log_warn "findomain failed."
     else
-        log_warn "amass not found. Skipping."
+        log_warn "findomain not found. Skipping."
+    fi
+}
+
+run_chaos() {
+    local domain="$1"
+    local chaos_key=""
+
+    chaos_key="$(chaos_api_key 2>/dev/null || true)"
+    if [ -z "$chaos_key" ]; then
+        log_info "CHAOS_KEY/CHAOS_API_KEY not set. Skipping chaos."
+        return 0
+    fi
+
+    if command_exists chaos; then
+        log_info "Running chaos against $domain"
+        chaos -d "$domain" -key "$chaos_key" -silent >> "$ENUMERATION_BUFFER" 2>> "$PIPELINE_LOG" || log_warn "chaos failed."
+    else
+        log_warn "chaos not found. Skipping."
     fi
 }
 
@@ -526,7 +571,8 @@ enumerate_subdomains() {
 
     run_subfinder "$domain"
     run_assetfinder "$domain"
-    run_amass "$domain"
+    run_findomain "$domain"
+    run_chaos "$domain"
 
     sanitize_targets_file "$ENUMERATION_BUFFER" > "$SUBDOMAINS_FILE"
     log_info "Saved $(line_count "$SUBDOMAINS_FILE") unique subdomains after enumeration."

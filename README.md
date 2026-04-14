@@ -26,10 +26,18 @@ The installer checks whether the required tools are present and attempts to inst
 The main pipeline script also performs an automatic dependency check at startup and warns when required tooling is missing for the selected mode.
 
 - Target platform: Kali/Debian-style Linux
-- Uses `apt` for base dependencies and `amass`
-- Uses `go install` for the Go-based tools
+- Uses `apt` for base dependencies and `findomain`
+- Uses `go install` for the Go-based tools, including `chaos`
 - Uses `pipx` with a `pip` fallback for the Python-based tools
 - Writes execution details to `install_tools.log`
+
+Optional API setup for Chaos:
+
+```bash
+export CHAOS_KEY="your_projectdiscovery_chaos_key"
+# or
+export CHAOS_API_KEY="your_projectdiscovery_chaos_key"
+```
 
 Check only, without installing:
 
@@ -84,7 +92,8 @@ If both `STDIN` and `-f` are provided, file mode wins and `STDIN` is ignored.
 Subdomain enumeration:
 - `subfinder`
 - `assetfinder`
-- `amass`
+- `findomain`
+- `chaos` when `CHAOS_KEY` or `CHAOS_API_KEY` is configured
 
 Probing:
 - `httpx`
@@ -100,7 +109,8 @@ URL collection:
 Installation coverage:
 - `subfinder`
 - `assetfinder`
-- `amass`
+- `findomain`
+- `chaos`
 - `httpx`
 - `waybackurls`
 - `gau`
@@ -134,6 +144,7 @@ Files created:
 - Set `NO_COLOR=1` if you want plain terminal output from either script.
 - Missing tools are logged and skipped.
 - `url_discovery.sh` warns at startup about missing dependencies and suggests `install_tools.sh` when it is available.
+- `chaos` is optional at runtime and only runs when `CHAOS_KEY` or `CHAOS_API_KEY` is set.
 - Tool failures do not stop the full pipeline.
 - Temporary files are created safely and cleaned up on exit.
 - `pipeline.log` and `install_tools.log` remain plain text even when the terminal output is colored.
