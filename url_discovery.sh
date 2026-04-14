@@ -25,6 +25,23 @@ ENUMERATION_BUFFER=""
 ARCHIVE_BUFFER=""
 CRAWL_BUFFER=""
 
+COLOR_RESET=""
+COLOR_BOLD=""
+COLOR_DIM=""
+COLOR_BLUE=""
+COLOR_GREEN=""
+COLOR_YELLOW=""
+COLOR_RED=""
+COLOR_MAGENTA=""
+COLOR_CYAN=""
+
+ICON_INFO="[*]"
+ICON_SUCCESS="[+]"
+ICON_WARN="[!]"
+ICON_ERROR="[-]"
+ICON_STAGE="[>]"
+ICON_INPUT="[?]"
+
 join_by() {
     local delimiter="$1"
     shift
@@ -42,6 +59,71 @@ join_by() {
     printf '%s' "$output"
 }
 
+initialize_ui() {
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+        COLOR_RESET=$'\033[0m'
+        COLOR_BOLD=$'\033[1m'
+        COLOR_DIM=$'\033[2m'
+        COLOR_BLUE=$'\033[34m'
+        COLOR_GREEN=$'\033[32m'
+        COLOR_YELLOW=$'\033[33m'
+        COLOR_RED=$'\033[31m'
+        COLOR_MAGENTA=$'\033[35m'
+        COLOR_CYAN=$'\033[36m'
+    fi
+}
+
+format_console_line() {
+    local level="$1"
+    shift
+    local message="$*"
+    local color="${COLOR_CYAN}${COLOR_BOLD}"
+    local icon="$ICON_INFO"
+
+    case "$level" in
+        INFO)
+            color="${COLOR_BLUE}${COLOR_BOLD}"
+            icon="$ICON_INFO"
+            ;;
+        WARN)
+            color="${COLOR_YELLOW}${COLOR_BOLD}"
+            icon="$ICON_WARN"
+            ;;
+        ERROR)
+            color="${COLOR_RED}${COLOR_BOLD}"
+            icon="$ICON_ERROR"
+            ;;
+        SUCCESS)
+            color="${COLOR_GREEN}${COLOR_BOLD}"
+            icon="$ICON_SUCCESS"
+            ;;
+    esac
+
+    printf '%b[%s]%b %b%s%b %s' "$COLOR_DIM" "$(timestamp)" "$COLOR_RESET" "$color" "$icon" "$COLOR_RESET" "$message"
+}
+
+print_banner() {
+    local line="============================================================"
+
+    printf '\n%b%s%b\n' "${COLOR_CYAN}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+    printf '%b URL Discovery Pipeline%b\n' "${COLOR_CYAN}${COLOR_BOLD}" "$COLOR_RESET"
+    printf '%b Subdomains -> Live Hosts -> URLs%b\n' "$COLOR_DIM" "$COLOR_RESET"
+    printf '%b%s%b\n\n' "${COLOR_CYAN}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+}
+
+print_stage() {
+    local title="$1"
+    local line="------------------------------------------------------------"
+
+    printf '\n%b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+    printf '%b%s%b %b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$ICON_STAGE" "$COLOR_RESET" "${COLOR_MAGENTA}${COLOR_BOLD}" "$title" "$COLOR_RESET"
+    printf '%b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+
+    if [ -n "$PIPELINE_LOG" ]; then
+        printf '[%s] [STAGE] %s\n' "$(timestamp)" "$title" >> "$PIPELINE_LOG"
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: $SCRIPT_NAME [-f subdomains.txt] [-o output_dir] [-d root-domain]
@@ -53,7 +135,7 @@ Modes:
 
 Options:
   -f, --file      Existing file with subdomains/hosts/URLs
-  -o, --output    Output directory (default: ./url_discovery_<timestamp>)
+    -o, --output    Output directory (default: $HOME/03-Links-Params)
   -d, --domain    Root domain to use without prompting
   -h, --help      Show this help text
 EOF
@@ -67,7 +149,20 @@ log() {
     local level="$1"
     shift
     local message="$*"
-    printf '[%s] [%s] %s\n' "$(timestamp)" "$level" "$message" | tee -a "$PIPELINE_LOG"
+    local plain_line="[$(timestamp)] [$level] $message"
+    local console_line=""
+
+    if [ -n "$PIPELINE_LOG" ]; then
+        printf '%s\n' "$plain_line" >> "$PIPELINE_LOG"
+    fi
+
+    console_line="$(format_console_line "$level" "$message")"
+
+    if [ "$level" = "ERROR" ]; then
+        printf '%b\n' "$console_line" >&2
+    else
+        printf '%b\n' "$console_line"
+    fi
 }
 
 log_info() {
@@ -80,6 +175,10 @@ log_warn() {
 
 log_error() {
     log "ERROR" "$@"
+}
+
+log_success() {
+    log "SUCCESS" "$@"
 }
 
 command_exists() {
@@ -105,7 +204,7 @@ trap cleanup EXIT INT TERM
 
 setup_workspace() {
     if [ -z "$OUTPUT_DIR" ]; then
-        OUTPUT_DIR="./url_discovery_${TIMESTAMP}"
+        OUTPUT_DIR="$HOME/03-Links-Params"
     fi
 
     mkdir -p "$OUTPUT_DIR"
@@ -373,7 +472,7 @@ load_targets_from_stdin() {
 
 prompt_for_root_domain() {
     if [ -z "$ROOT_DOMAIN" ]; then
-        printf 'Root domain: ' >&2
+        printf '%b%s%b ' "${COLOR_MAGENTA}${COLOR_BOLD}" "$ICON_INPUT Root domain:" "$COLOR_RESET" >&2
         IFS= read -r ROOT_DOMAIN
     fi
 
@@ -421,6 +520,8 @@ run_amass() {
 enumerate_subdomains() {
     local domain="$1"
 
+    print_stage "Subdomain Enumeration"
+
     : > "$ENUMERATION_BUFFER"
 
     run_subfinder "$domain"
@@ -432,6 +533,8 @@ enumerate_subdomains() {
 }
 
 probe_live_hosts() {
+    print_stage "Live Host Probing"
+
     : > "$LIVE_HOSTS_FILE"
 
     if [ ! -s "$SUBDOMAINS_FILE" ]; then
@@ -573,6 +676,8 @@ merge_and_finalize_urls() {
 }
 
 collect_urls() {
+    print_stage "URL Collection"
+
     : > "$ARCHIVE_BUFFER"
     : > "$CRAWL_BUFFER"
 
@@ -587,18 +692,24 @@ collect_urls() {
 }
 
 print_summary() {
-    log_info "Pipeline complete. Output directory: $OUTPUT_DIR"
+    print_stage "Run Summary"
+
+    log_success "Pipeline complete. Output directory: $OUTPUT_DIR"
     log_info "subdomains_unique.txt: $(line_count "$SUBDOMAINS_FILE") lines"
     log_info "live_hosts.txt: $(line_count "$LIVE_HOSTS_FILE") lines"
     log_info "urls_raw.txt: $(line_count "$URLS_RAW_FILE") lines"
     log_info "urls_unique.txt: $(line_count "$URLS_UNIQUE_FILE") lines"
     log_info "urls_with_params.txt: $(line_count "$URLS_PARAMS_FILE") lines"
+    log_info "pipeline.log: $PIPELINE_LOG"
 }
 
 main() {
+    initialize_ui
     parse_args "$@"
     detect_mode
     setup_workspace
+
+    print_banner
 
     log_info "Selected mode: $MODE"
 
@@ -606,6 +717,7 @@ main() {
         log_warn "STDIN detected together with --file. Ignoring STDIN and using file mode."
     fi
 
+    print_stage "Dependency Check"
     warn_missing_dependencies
 
     case "$MODE" in

@@ -114,8 +114,10 @@ Installation coverage:
 By default, the script writes results to:
 
 ```bash
-./url_discovery_<timestamp>/
+$HOME/03-Links-Params/
 ```
+
+If you run the script multiple times without `-o`, it overwrites the same output filenames in that directory.
 
 Files created:
 
@@ -128,10 +130,13 @@ Files created:
 
 ## Behavior Notes
 
+- Both scripts use colors, symbols, and styled stage headers when running in a compatible shell.
+- Set `NO_COLOR=1` if you want plain terminal output from either script.
 - Missing tools are logged and skipped.
 - `url_discovery.sh` warns at startup about missing dependencies and suggests `install_tools.sh` when it is available.
 - Tool failures do not stop the full pipeline.
 - Temporary files are created safely and cleaned up on exit.
+- `pipeline.log` and `install_tools.log` remain plain text even when the terminal output is colored.
 - URLs are normalized before deduplication.
 - `urls_with_params.txt` contains only URLs with `?` query parameters.
 - The script is intended for practical Kali/Linux usage.

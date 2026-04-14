@@ -12,6 +12,104 @@ APT_UPDATED=0
 INSTALLED_TOOLS=()
 MISSING_TOOLS=()
 
+COLOR_RESET=""
+COLOR_BOLD=""
+COLOR_DIM=""
+COLOR_BLUE=""
+COLOR_GREEN=""
+COLOR_YELLOW=""
+COLOR_RED=""
+COLOR_MAGENTA=""
+COLOR_CYAN=""
+
+ICON_INFO="[*]"
+ICON_SUCCESS="[+]"
+ICON_WARN="[!]"
+ICON_ERROR="[-]"
+ICON_STAGE="[>]"
+
+join_by() {
+    local delimiter="$1"
+    shift
+    local item=""
+    local output=""
+
+    for item in "$@"; do
+        if [ -z "$output" ]; then
+            output="$item"
+        else
+            output="$output$delimiter$item"
+        fi
+    done
+
+    printf '%s' "$output"
+}
+
+initialize_ui() {
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+        COLOR_RESET=$'\033[0m'
+        COLOR_BOLD=$'\033[1m'
+        COLOR_DIM=$'\033[2m'
+        COLOR_BLUE=$'\033[34m'
+        COLOR_GREEN=$'\033[32m'
+        COLOR_YELLOW=$'\033[33m'
+        COLOR_RED=$'\033[31m'
+        COLOR_MAGENTA=$'\033[35m'
+        COLOR_CYAN=$'\033[36m'
+    fi
+}
+
+format_console_line() {
+    local level="$1"
+    shift
+    local message="$*"
+    local color="${COLOR_CYAN}${COLOR_BOLD}"
+    local icon="$ICON_INFO"
+
+    case "$level" in
+        INFO)
+            color="${COLOR_BLUE}${COLOR_BOLD}"
+            icon="$ICON_INFO"
+            ;;
+        WARN)
+            color="${COLOR_YELLOW}${COLOR_BOLD}"
+            icon="$ICON_WARN"
+            ;;
+        ERROR)
+            color="${COLOR_RED}${COLOR_BOLD}"
+            icon="$ICON_ERROR"
+            ;;
+        SUCCESS)
+            color="${COLOR_GREEN}${COLOR_BOLD}"
+            icon="$ICON_SUCCESS"
+            ;;
+    esac
+
+    printf '%b[%s]%b %b%s%b %s' "$COLOR_DIM" "$(timestamp)" "$COLOR_RESET" "$color" "$icon" "$COLOR_RESET" "$message"
+}
+
+print_banner() {
+    local line="============================================================"
+
+    printf '\n%b%s%b\n' "${COLOR_CYAN}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+    printf '%b Dependency Installer%b\n' "${COLOR_CYAN}${COLOR_BOLD}" "$COLOR_RESET"
+    printf '%b Verify and bootstrap URL discovery tooling%b\n' "$COLOR_DIM" "$COLOR_RESET"
+    printf '%b%s%b\n\n' "${COLOR_CYAN}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+}
+
+print_stage() {
+    local title="$1"
+    local line="------------------------------------------------------------"
+
+    printf '\n%b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+    printf '%b%s%b %b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$ICON_STAGE" "$COLOR_RESET" "${COLOR_MAGENTA}${COLOR_BOLD}" "$title" "$COLOR_RESET"
+    printf '%b%s%b\n' "${COLOR_MAGENTA}${COLOR_BOLD}" "$line" "$COLOR_RESET"
+
+    if [ -n "$LOG_FILE" ]; then
+        printf '[%s] [STAGE] %s\n' "$(timestamp)" "$title" >> "$LOG_FILE"
+    fi
+}
+
 usage() {
     cat <<EOF
 Usage: $SCRIPT_NAME [--check-only]
@@ -33,7 +131,20 @@ log() {
     local level="$1"
     shift
     local message="$*"
-    printf '[%s] [%s] %s\n' "$(timestamp)" "$level" "$message" | tee -a "$LOG_FILE"
+    local plain_line="[$(timestamp)] [$level] $message"
+    local console_line=""
+
+    if [ -n "$LOG_FILE" ]; then
+        printf '%s\n' "$plain_line" >> "$LOG_FILE"
+    fi
+
+    console_line="$(format_console_line "$level" "$message")"
+
+    if [ "$level" = "ERROR" ]; then
+        printf '%b\n' "$console_line" >&2
+    else
+        printf '%b\n' "$console_line"
+    fi
 }
 
 log_info() {
@@ -46,6 +157,10 @@ log_warn() {
 
 log_error() {
     log "ERROR" "$@"
+}
+
+log_success() {
+    log "SUCCESS" "$@"
 }
 
 command_exists() {
@@ -194,7 +309,7 @@ check_or_install_apt_tool() {
     fi
 
     if install_apt_packages "$package_name" && command_exists "$tool_name"; then
-        log_info "$tool_name installed successfully via apt."
+        log_success "$tool_name installed successfully via apt."
         record_installed "$tool_name"
         return 0
     fi
@@ -234,7 +349,7 @@ check_or_install_go_tool() {
     fi
 
     if command_exists "$tool_name" || [ -x "$HOME/go/bin/$tool_name" ]; then
-        log_info "$tool_name installed successfully via Go."
+        log_success "$tool_name installed successfully via Go."
         record_installed "$tool_name"
         return 0
     fi
@@ -273,7 +388,7 @@ check_or_install_python_tool() {
     hash -r
 
     if command_exists "$tool_name" || [ -x "$HOME/.local/bin/$tool_name" ]; then
-        log_info "$tool_name installed successfully via Python tooling."
+        log_success "$tool_name installed successfully via Python tooling."
         record_installed "$tool_name"
         return 0
     fi
@@ -297,31 +412,32 @@ check_required_tools() {
 }
 
 print_summary() {
-    printf '\n' | tee -a "$LOG_FILE"
+    print_stage "Installer Summary"
     log_info "Installation log: $LOG_FILE"
 
     if [ "${#INSTALLED_TOOLS[@]}" -gt 0 ]; then
-        log_info "Available tools: ${INSTALLED_TOOLS[*]}"
+        log_info "Available tools: $(join_by ', ' "${INSTALLED_TOOLS[@]}")"
     fi
 
     if [ "${#MISSING_TOOLS[@]}" -gt 0 ]; then
-        log_warn "Missing tools: ${MISSING_TOOLS[*]}"
-        printf 'Add these paths in a new shell if commands are not found:\n' | tee -a "$LOG_FILE"
-        printf '  export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"\n' | tee -a "$LOG_FILE"
+        log_warn "Missing tools: $(join_by ', ' "${MISSING_TOOLS[@]}")"
+        log_info "Add these paths in a new shell if commands are not found:"
+        log_info 'export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"'
         return 1
     fi
 
-    printf 'All required tools are available.\n' | tee -a "$LOG_FILE"
-    printf 'If a new shell does not find the commands, export:\n' | tee -a "$LOG_FILE"
-    printf '  export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"\n' | tee -a "$LOG_FILE"
+    log_success "All required tools are available."
+    log_info "If a new shell does not find the commands, export:"
+    log_info 'export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"'
 
     return 0
 }
 
 main() {
-    : > "$LOG_FILE"
-
+    initialize_ui
     parse_args "$@"
+    : > "$LOG_FILE"
+    print_banner
     ensure_linux
     ensure_user_paths
 
@@ -329,9 +445,11 @@ main() {
     if [ "$CHECK_ONLY" -eq 1 ]; then
         log_info "Check-only mode enabled. No installation will be performed."
     else
+        print_stage "Core Dependencies"
         ensure_core_dependencies
     fi
 
+    print_stage "Required Tools"
     check_required_tools
     print_summary
 }
